@@ -78,6 +78,10 @@ st.markdown("""
 # --- Configuration ---
 COLLECTION_NAME = 'anaplan_community'
 
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
 # --- Caching Functions ---
 @st.cache_resource
 def load_llm():
@@ -86,12 +90,23 @@ def load_llm():
     if not google_api_key:
         load_dotenv()
         google_api_key = os.getenv("GOOGLE_API_KEY")
+<<<<<<< Updated upstream
     
     if not google_api_key:
         st.error("🔴 Google API key not found. Please add it to your Streamlit Secrets or a .env file.")
         st.stop()
         
     return ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=google_api_key, temperature=0, convert_system_message_to_human=True)
+=======
+
+    if not google_api_key:
+        st.error("🔴 Google API key not found. Please add it to your Streamlit Secrets or a .env file.")
+        st.stop()
+
+    return ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=google_api_key, temperature=0,
+                                  convert_system_message_to_human=True)
+
+>>>>>>> Stashed changes
 
 @st.cache_resource
 def load_vector_store():
@@ -111,13 +126,21 @@ def load_vector_store():
         st.stop()
 
     embedding_function = HuggingFaceEmbeddings(model_name="BAAI/bge-small-en-v1.5")
+<<<<<<< Updated upstream
     
+=======
+
+>>>>>>> Stashed changes
     client = chromadb.CloudClient(
         tenant=chroma_tenant,
         database=chroma_database,
         api_key=chroma_api_key
     )
+<<<<<<< Updated upstream
     
+=======
+
+>>>>>>> Stashed changes
     vectorstore = Chroma(
         client=client,
         collection_name=COLLECTION_NAME,
@@ -128,7 +151,14 @@ def load_vector_store():
 def format_docs(docs):
     """Prepares retrieved documents for the prompt."""
     if not docs: return "No relevant documents were found."
+<<<<<<< Updated upstream
     return "\n\n".join(f"--- Source: {doc.metadata.get('title', 'N/A')} ---\nURL: {doc.metadata.get('url', 'N/A')}\nContent: {doc.page_content}" for doc in docs)
+=======
+    return "\n\n".join(
+        f"--- Source: {doc.metadata.get('title', 'N/A')} ---\nURL: {doc.metadata.get('url', 'N/A')}\nContent: {doc.page_content}"
+        for doc in docs)
+
+>>>>>>> Stashed changes
 
 # --- Main App Logic ---
 st.title("🚀 Synapse AI")
@@ -169,4 +199,8 @@ if question:
             st.markdown("### 💡 Answer")
             st.markdown(f'<div class="response-container">{formatted_response}</div>', unsafe_allow_html=True)
         except Exception as e:
+<<<<<<< Updated upstream
             st.error(f"An error occurred: {e}")
+=======
+            st.error(f"An error occurred: {e}")
+>>>>>>> Stashed changes
