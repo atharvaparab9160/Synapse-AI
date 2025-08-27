@@ -1,0 +1,11 @@
+# Ignore the local vector database folder
+anaplan_db/
+Run_Local/
+
+# Ignore the environment file containing API keys
+.env
+
+# Ignore Python cache and system files
+__pycache__/
+*.pyc
+.idea/
