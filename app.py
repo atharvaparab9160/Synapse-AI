@@ -1,6 +1,6 @@
 import os
-import chromadb
 import streamlit as st
+import chromadb
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -42,12 +42,16 @@ st.markdown("""
         color: white;
         border-color: #4F8BF9;
     }
+
+    /* Title with Gradient */
     h1 {
         background: -webkit-linear-gradient(45deg, #4F8BF9, #8A2BE2);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         font-weight: bold;
     }
+
+    /* Response Box Styling */
     .response-container {
         background-color: #1E222A;
         border-left: 5px solid #4F8BF9;
@@ -57,59 +61,63 @@ st.markdown("""
         white-space: pre-wrap; /* Preserve formatting */
         word-wrap: break-word;
     }
-    .response-container a { color: #63A6FF; text-decoration: none; }
-    .response-container a:hover { text-decoration: underline; }
+    .response-container h3 {
+        color: #FAFAFA;
+        margin-top: 0;
+    }
+    .response-container a {
+        color: #63A6FF;
+        text-decoration: none;
+    }
+    .response-container a:hover {
+        text-decoration: underline;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # --- Configuration ---
 COLLECTION_NAME = 'anaplan_community'
 
-# --- Caching Functions to improve performance ---
+# --- Caching Functions ---
 @st.cache_resource
 def load_llm():
-    """Loads the Language Model from Streamlit Secrets."""
-    # Try to get the key from Streamlit's secrets manager first
+    """Loads the Language Model from Streamlit Secrets or .env file."""
     google_api_key = st.secrets.get("GOOGLE_API_KEY")
-    # If not found (e.g., running locally), fall back to .env file
     if not google_api_key:
         load_dotenv()
         google_api_key = os.getenv("GOOGLE_API_KEY")
     
     if not google_api_key:
-        st.error("🔴 Google API key not found. Please add it to your Streamlit Secrets or .env file.")
+        st.error("🔴 Google API key not found. Please add it to your Streamlit Secrets or a .env file.")
         st.stop()
         
-    return ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
-        google_api_key=google_api_key,
-        temperature=0,
-        convert_system_message_to_human=True
-    )
+    return ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=google_api_key, temperature=0, convert_system_message_to_human=True)
 
 @st.cache_resource
 def load_vector_store():
     """Connects to the hosted ChromaDB Cloud vector store."""
-    # Try to get credentials from Streamlit's secrets manager first
-    chroma_host = st.secrets.get("CHROMA_HOST")
     chroma_api_key = st.secrets.get("CHROMA_API_KEY")
+    chroma_tenant = st.secrets.get("CHROMA_TENANT")
+    chroma_database = st.secrets.get("CHROMA_DATABASE")
 
-    # If not found (e.g., running locally), fall back to .env file
-    if not all([chroma_host, chroma_api_key]):
+    if not all([chroma_api_key, chroma_tenant, chroma_database]):
         load_dotenv()
-        chroma_host = os.getenv("CHROMA_HOST")
         chroma_api_key = os.getenv("CHROMA_API_KEY")
+        chroma_tenant = os.getenv("CHROMA_TENANT")
+        chroma_database = os.getenv("CHROMA_DATABASE")
 
-    if not all([chroma_host, chroma_api_key]):
-        st.error("🔴 ChromaDB credentials not found. Please add them to your Streamlit Secrets or .env file.")
+    if not all([chroma_api_key, chroma_tenant, chroma_database]):
+        st.error("🔴 ChromaDB credentials not found. Please add them to your Streamlit Secrets or a .env file.")
         st.stop()
 
     embedding_function = HuggingFaceEmbeddings(model_name="BAAI/bge-small-en-v1.5")
     
-    # Initialize the ChromaDB client to connect to the cloud
-    client = chromadb.HttpClient(host=chroma_host, headers={"Authorization": f"Bearer {chroma_api_key}"})
+    client = chromadb.CloudClient(
+        tenant=chroma_tenant,
+        database=chroma_database,
+        api_key=chroma_api_key
+    )
     
-    # Get the collection from the cloud
     vectorstore = Chroma(
         client=client,
         collection_name=COLLECTION_NAME,
@@ -118,22 +126,13 @@ def load_vector_store():
     return vectorstore
 
 def format_docs(docs):
-    """Prepares the retrieved documents for insertion into the prompt."""
-    if not docs:
-        return "No relevant documents were found in the knowledge base."
-
-    formatted_context = ""
-    for i, doc in enumerate(docs):
-        title = doc.metadata.get('title', 'No Title')
-        url = doc.metadata.get('url', 'No URL')
-        formatted_context += f"--- Source {i + 1}: {title} ---\n"
-        formatted_context += f"URL: {url}\n"
-        formatted_context += f"Content: {doc.page_content}\n\n"
-    return formatted_context
+    """Prepares retrieved documents for the prompt."""
+    if not docs: return "No relevant documents were found."
+    return "\n\n".join(f"--- Source: {doc.metadata.get('title', 'N/A')} ---\nURL: {doc.metadata.get('url', 'N/A')}\nContent: {doc.page_content}" for doc in docs)
 
 # --- Main App Logic ---
-st.title("🚀 Anaplan Synapse AI")
-st.markdown("Your intelligent guide to the Anaplan Community forums. Ask a question to get a synthesized answer with sources.")
+st.title("🚀 Synapse AI")
+st.markdown("Your intelligent guide to community forums, powered by Gemini.")
 
 llm = load_llm()
 vectorstore = load_vector_store()
@@ -144,7 +143,7 @@ You are an expert Anaplan assistant. Your task is to answer the user's question 
 Analyze the context provided below. It contains several sources, each with a URL.
 Based on this context, synthesize a clear and concise answer (if needed answer in proper points).
 If the context does not contain enough information to answer the question, state that you cannot find a specific answer in the provided sources. Do not make up information or use any external knowledge.
-answer in proper pointer format ,Make sure the response looks good when rendered in Streamlit’s st.markdown, without large gaps or misaligned text.
+answer in proper pointe rformat ,Make sure the response looks good when rendered in Streamlit’s st.markdown, without large gaps or misaligned text.
 After your answer, you MUST list the URLs of all the sources you used to formulate your answer under a "Sources:" heading.
 
 CONTEXT:
@@ -157,18 +156,12 @@ ANSWER:
 """
 prompt = ChatPromptTemplate.from_template(template)
 
-rag_chain = (
-    {"context": retriever | format_docs, "question": RunnablePassthrough()}
-    | prompt
-    | llm
-    | StrOutputParser()
-)
+rag_chain = ({"context": retriever | format_docs, "question": RunnablePassthrough()} | prompt | llm | StrOutputParser())
 
-# --- User Interface ---
-question = st.text_input("Ask your Anaplan question:", placeholder="e.g., How do I use SUM with multiple conditions?")
+question = st.text_input("Ask a question:", placeholder="e.g., How do I use SUM with multiple conditions?")
 
 if question:
-    with st.spinner('Searching the Anaplan universe...'):
+    with st.spinner('Searching the knowledge base...'):
         try:
             response = rag_chain.invoke(question)
             url_pattern = re.compile(r'https?://[^\s]+')
