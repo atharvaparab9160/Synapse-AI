@@ -9,6 +9,8 @@ from langchain.schema.runnable import RunnablePassthrough
 from langchain.schema.output_parser import StrOutputParser
 from dotenv import load_dotenv
 import re
+# Import the CrossEncoder for re-ranking
+from sentence_transformers.cross_encoder import CrossEncoder
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -17,7 +19,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Custom CSS for "Out of this World" UI ---
+# --- Custom CSS ---
 st.markdown("""
 <style>
     /* General Styling */
@@ -42,16 +44,12 @@ st.markdown("""
         color: white;
         border-color: #4F8BF9;
     }
-
-    /* Title with Gradient */
     h1 {
         background: -webkit-linear-gradient(45deg, #4F8BF9, #8A2BE2);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         font-weight: bold;
     }
-
-    /* Response Box Styling */
     .response-container {
         background-color: #1E222A;
         border-left: 5px solid #4F8BF9;
@@ -61,43 +59,23 @@ st.markdown("""
         white-space: pre-wrap; /* Preserve formatting */
         word-wrap: break-word;
     }
-    .response-container h3 {
-        color: #FAFAFA;
-        margin-top: 0;
-    }
-    .response-container a {
-        color: #63A6FF;
-        text-decoration: none;
-    }
-    .response-container a:hover {
-        text-decoration: underline;
-    }
+    .response-container a { color: #63A6FF; text-decoration: none; }
+    .response-container a:hover { text-decoration: underline; }
 </style>
 """, unsafe_allow_html=True)
 
 # --- Configuration ---
 COLLECTION_NAME = 'anaplan_community'
 
-<<<<<<< Updated upstream
-=======
 
->>>>>>> Stashed changes
 # --- Caching Functions ---
 @st.cache_resource
 def load_llm():
     """Loads the Language Model from Streamlit Secrets or .env file."""
-    google_api_key = st.secrets.get("GOOGLE_API_KEY")
+    google_api_key = os.getenv("GOOGLE_API_KEY")
     if not google_api_key:
         load_dotenv()
         google_api_key = os.getenv("GOOGLE_API_KEY")
-<<<<<<< Updated upstream
-    
-    if not google_api_key:
-        st.error("🔴 Google API key not found. Please add it to your Streamlit Secrets or a .env file.")
-        st.stop()
-        
-    return ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=google_api_key, temperature=0, convert_system_message_to_human=True)
-=======
 
     if not google_api_key:
         st.error("🔴 Google API key not found. Please add it to your Streamlit Secrets or a .env file.")
@@ -106,14 +84,13 @@ def load_llm():
     return ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=google_api_key, temperature=0,
                                   convert_system_message_to_human=True)
 
->>>>>>> Stashed changes
 
 @st.cache_resource
 def load_vector_store():
     """Connects to the hosted ChromaDB Cloud vector store."""
-    chroma_api_key = st.secrets.get("CHROMA_API_KEY")
-    chroma_tenant = st.secrets.get("CHROMA_TENANT")
-    chroma_database = st.secrets.get("CHROMA_DATABASE")
+    chroma_api_key = os.getenv("CHROMA_API_KEY")
+    chroma_tenant = os.getenv("CHROMA_TENANT")
+    chroma_database = os.getenv("CHROMA_DATABASE")
 
     if not all([chroma_api_key, chroma_tenant, chroma_database]):
         load_dotenv()
@@ -126,21 +103,13 @@ def load_vector_store():
         st.stop()
 
     embedding_function = HuggingFaceEmbeddings(model_name="BAAI/bge-small-en-v1.5")
-<<<<<<< Updated upstream
-    
-=======
 
->>>>>>> Stashed changes
     client = chromadb.CloudClient(
         tenant=chroma_tenant,
         database=chroma_database,
         api_key=chroma_api_key
     )
-<<<<<<< Updated upstream
-    
-=======
 
->>>>>>> Stashed changes
     vectorstore = Chroma(
         client=client,
         collection_name=COLLECTION_NAME,
@@ -148,26 +117,35 @@ def load_vector_store():
     )
     return vectorstore
 
+
+@st.cache_resource
+def load_reranker():
+    """Loads the Cross-Encoder model for re-ranking."""
+    return CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+
+
 def format_docs(docs):
     """Prepares retrieved documents for the prompt."""
     if not docs: return "No relevant documents were found."
-<<<<<<< Updated upstream
-    return "\n\n".join(f"--- Source: {doc.metadata.get('title', 'N/A')} ---\nURL: {doc.metadata.get('url', 'N/A')}\nContent: {doc.page_content}" for doc in docs)
-=======
     return "\n\n".join(
         f"--- Source: {doc.metadata.get('title', 'N/A')} ---\nURL: {doc.metadata.get('url', 'N/A')}\nContent: {doc.page_content}"
         for doc in docs)
 
->>>>>>> Stashed changes
 
 # --- Main App Logic ---
+st.info("For any grievances or feedback, please contact us at: synapse.ai.help@gmail.com")
 st.title("🚀 Synapse AI")
 st.markdown("Your intelligent guide to community forums, powered by Gemini.")
 
+# Load all necessary models and the vector store
 llm = load_llm()
 vectorstore = load_vector_store()
-retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+reranker = load_reranker()
 
+# The retriever will fetch a larger number of initial documents for re-ranking
+retriever = vectorstore.as_retriever(search_kwargs={"k": 20})
+
+# Define the prompt template
 template = """
 You are an expert Anaplan assistant. Your task is to answer the user's question based ONLY on the provided context.
 Analyze the context provided below. It contains several sources, each with a URL.
@@ -186,21 +164,45 @@ ANSWER:
 """
 prompt = ChatPromptTemplate.from_template(template)
 
-rag_chain = ({"context": retriever | format_docs, "question": RunnablePassthrough()} | prompt | llm | StrOutputParser())
-
+# --- User Interface ---
 question = st.text_input("Ask a question:", placeholder="e.g., How do I use SUM with multiple conditions?")
 
 if question:
-    with st.spinner('Searching the knowledge base...'):
+    with st.spinner('Searching, analyzing, and re-ranking...'):
         try:
-            response = rag_chain.invoke(question)
+            # --- RAG with Re-ranking Workflow ---
+            # 1. Retrieve a broad set of potentially relevant documents
+            initial_docs = retriever.invoke(question)
+
+            # 2. Re-rank these documents for higher relevance
+            if initial_docs:
+                # Create pairs of [question, document_text] for the Cross-Encoder
+                pairs = [[question, doc.page_content] for doc in initial_docs]
+                scores = reranker.predict(pairs)
+
+                # Combine documents with their new scores and sort them
+                doc_with_scores = list(zip(initial_docs, scores))
+                doc_with_scores.sort(key=lambda x: x[1], reverse=True)
+
+                # Select the top 5 documents after re-ranking
+                reranked_docs = [doc for doc, score in doc_with_scores[:5]]
+
+                # 3. Format only the best documents to be sent to the LLM
+                context = format_docs(reranked_docs)
+            else:
+                context = "No relevant documents were found."
+
+            # 4. Build and invoke the final chain with the high-quality, re-ranked context
+            final_chain = prompt | llm | StrOutputParser()
+            response = final_chain.invoke({"context": context, "question": question})
+
+            # --- Display the response ---
             url_pattern = re.compile(r'https?://[^\s]+')
             formatted_response = url_pattern.sub(r'[\g<0>](\g<0>)', response)
+
             st.markdown("### 💡 Answer")
             st.markdown(f'<div class="response-container">{formatted_response}</div>', unsafe_allow_html=True)
+
         except Exception as e:
-<<<<<<< Updated upstream
             st.error(f"An error occurred: {e}")
-=======
-            st.error(f"An error occurred: {e}")
->>>>>>> Stashed changes
+
