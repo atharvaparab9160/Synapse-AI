@@ -246,7 +246,7 @@ def get_response(question: str, chat_history: list):
 
 # Sidebar for controls and prompts
 with st.sidebar:
-    st.title("🚀 Synapse AI")
+    st.title("Synapse AI")
 
     if st.button("Start New Chat", use_container_width=True):
         st.session_state.messages = []
