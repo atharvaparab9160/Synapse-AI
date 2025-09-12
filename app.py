@@ -11,19 +11,20 @@ from dotenv import load_dotenv
 import re
 from sentence_transformers.cross_encoder import CrossEncoder
 from langchain_community.tools.tavily_search import TavilySearchResults
-# --- NEW IMPORTS FOR MEMORY ---
 from langchain.chains import create_history_aware_retriever
 from langchain_core.prompts import MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
+# --- NEW IMPORT FOR THE SPECIFIC RATE LIMIT ERROR ---
+from google.api_core import exceptions as google_exceptions
 
-# --- Page Configuration (MUST BE THE FIRST STREAMLIT COMMAND) ---
+# --- Page Configuration (UNCHANGED) ---
 st.set_page_config(
     page_title="Synapse AI",
     page_icon="🧠",
     layout="wide"
 )
 
-# --- Custom CSS for Professional Chat UI (UNCHANGED) ---
+# --- Custom CSS (UNCHANGED) ---
 st.markdown("""
 <style>
     /* Main App Styling */
@@ -49,10 +50,6 @@ st.markdown("""
         background: -webkit-linear-gradient(45deg, #4F8BF9, #8A2BE2);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-    }
-    .st-emotion-cache-16txtl3 { /* Sidebar Title */
-        color: #FAFAFA;
-        font-weight: bold;
     }
     .stButton > button { /* Sidebar & Suggested Prompts Buttons */
         border-radius: 8px;
@@ -103,33 +100,19 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- Configuration & Caching Functions (UNCHANGED) ---
-COLLECTION_NAME = 'anaplan_community'
 
-
-@st.cache_resource
-def load_llm():
-    load_dotenv()
-    google_api_key = os.getenv("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY")
-    if not google_api_key:
-        st.error("🔴 Google API key not found.")
-        st.stop()
-    return ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=google_api_key, temperature=0,
-                                  convert_system_message_to_human=True)
-
-
+# --- Caching Functions (load_llm is REMOVED as it's now dynamic) ---
 @st.cache_resource
 def load_vector_store():
     load_dotenv()
     chroma_api_key = os.getenv("CHROMA_API_KEY") or st.secrets.get("CHROMA_API_KEY")
     chroma_tenant = os.getenv("CHROMA_TENANT") or st.secrets.get("CHROMA_TENANT")
     chroma_database = os.getenv("CHROMA_DATABASE") or st.secrets.get("CHROMA_DATABASE")
-    if not all([chroma_api_key, chroma_tenant, chroma_database]):
-        st.error("🔴 ChromaDB credentials not found.")
-        st.stop()
+    if not all([chroma_api_key, chroma_tenant, chroma_database]): st.error(
+        "🔴 ChromaDB credentials not found."); st.stop()
     embedding_function = HuggingFaceEmbeddings(model_name="BAAI/bge-small-en-v1.5")
     client = chromadb.CloudClient(tenant=chroma_tenant, database=chroma_database, api_key=chroma_api_key)
-    return Chroma(client=client, collection_name=COLLECTION_NAME, embedding_function=embedding_function)
+    return Chroma(client=client, collection_name='anaplan_community', embedding_function=embedding_function)
 
 
 @st.cache_resource
@@ -141,9 +124,7 @@ def load_reranker():
 def load_search_tool():
     load_dotenv()
     tavily_api_key = os.getenv("TAVILY_API_KEY") or st.secrets.get("TAVILY_API_KEY")
-    if not tavily_api_key:
-        st.error("🔴 Tavily API key not found.")
-        st.stop()
+    if not tavily_api_key: st.error("🔴 Tavily API key not found."); st.stop()
     return TavilySearchResults(k=3, tavily_api_key=tavily_api_key)
 
 
@@ -152,7 +133,7 @@ def format_docs(docs):
     if not docs: return "No relevant documents were found."
     return "\n\n".join(
         f"--- Source: {doc.metadata.get('title', 'N/A')} ---\nURL: {doc.metadata.get('url', 'N/A')}\nContent: {doc.page_content}"
-        for doc in docs)
+        for doc in docs), [doc.metadata.get('url', 'N/A') for doc in docs]
 
 
 def format_chat_history_for_chain(messages):
@@ -160,121 +141,159 @@ def format_chat_history_for_chain(messages):
             in messages]
 
 
-# --- Main App Logic & RAG Chains ---
-llm = load_llm()
-vectorstore = load_vector_store()
-reranker = load_reranker()
-retriever = vectorstore.as_retriever(search_kwargs={"k": 20})
-web_search_tool = load_search_tool()
-
-# --- NEW: History-Aware Rewriting Chain ---
-contextualize_q_prompt = ChatPromptTemplate.from_messages([
-    ("system",
-     "Given a chat history and the latest user question which might reference context in the chat history, formulate a standalone question which can be understood without the chat history. If the question is not related with the History return the question as it is by just refining the prompt. Do NOT answer the question, just reformulate it if needed and otherwise return it as is."),
-    MessagesPlaceholder("chat_history"),
-    ("human", "{input}"),
-])
-history_aware_retriever_chain = create_history_aware_retriever(llm, retriever, contextualize_q_prompt)
-
-# --- Agentic Chains (Gap and Relevance) ---
-gap_router_prompt = ChatPromptTemplate.from_template("""Based on the user's question, chat history, and the retrieved context, determine if the context is sufficient to provide a high-confidence answer. Respond with only 'Yes' or 'No'.
-QUESTION: {question}
-CONTEXT: {context}""")
-gap_router_chain = gap_router_prompt | llm | StrOutputParser()
-
-relevance_router_prompt = ChatPromptTemplate.from_template("""
-You are a topic classifier. Your task is to determine if the user's question is related to Anaplan, business planning, finance, supply chain, or data modeling topics. 
-Even if it is little realted with anaplan try responding with 'Yes'
-Respond with only 'Yes' or 'No'.
-QUESTION: {question}
-""")
-relevance_router_chain = relevance_router_prompt | llm | StrOutputParser()
-
-# --- CORRECTED: Final Answer Generation Chain (NO LONGER takes chat_history) ---
-answer_prompt = ChatPromptTemplate.from_template("""You are an expert Anaplan assistant.  
-Answer the user's question **strictly using ONLY the information in the provided context**.  
-- Present your answer in **clear bullet points**.  
-- Keep each point concise and professional.  
-- If the context does not contain enough information to answer confidently, explicitly state that no specific answer is available in the provided sources. Do not infer or fabricate information.  
-- After the answer, include a "Sources:" section, with each source URL listed as a bullet point. If no sources are available, write "Sources: None".  
-
-CONTEXT:  
-{context}  
-
-QUESTION:  
-{question}  
-
-ANSWER:
-""")
-answer_chain = answer_prompt | llm | StrOutputParser()
-
-
-def rerank_docs(inputs):
+def rerank_docs(inputs, reranker_model):
     question = inputs['question']
     docs = inputs['docs']
     if not docs: return []
     pairs = [[question, doc.page_content] for doc in docs]
-    scores = reranker.predict(pairs)
+    scores = reranker_model.predict(pairs)
     doc_with_scores = list(zip(docs, scores))
     doc_with_scores.sort(key=lambda x: x[1], reverse=True)
     return [doc for doc, score in doc_with_scores[:5]]
 
 
-# --- UPDATED: Full agentic workflow with CONVERSATIONAL MEMORY ---
-def get_response(question: str, chat_history: list):
-    # 1. First, create a standalone question using the history
-    standalone_question_chain = contextualize_q_prompt | llm | StrOutputParser()
-    standalone_question = standalone_question_chain.invoke({
-        "chat_history": chat_history,
-        "input": question
-    })
+# --- RE-ARCHITECTED: Full Agentic Workflow with Self-Healing Key Management ---
+def get_response(user_question: str, chat_history: list):
+    load_dotenv()
 
-    # 2. Retrieve documents based on the standalone question
-    # st.title(standalone_question)
-    retrieved_docs = retriever.invoke(standalone_question)
+    # 1. Load the pool of API keys from numbered environment variables
+    api_keys = []
 
-    # 3. Re-rank the retrieved documents
-    reranked_docs = rerank_docs({"question": standalone_question, "docs": retrieved_docs})
-    formatted_context = format_docs(reranked_docs)
-    # st.write(formatted_context)
+    key = os.getenv(f"GOOGLE_API_KEYS") or st.secrets.get(f"GOOGLE_API_KEYS")
+    if key:
+        api_keys = list(key.split(","))
 
-    # 4. Agentic "Knowledge Gap" Check (uses the standalone question)
-    decision = gap_router_chain.invoke({
-        "question": standalone_question,
-        "context": formatted_context
-    })
+    if not api_keys:
+        return "Error: No Google API keys found. Please add GOOGLE_API_KEY_1, etc. to your secrets."
 
-    if "yes" in decision.lower():
-        # 5a. Generate answer from internal knowledge
-        return answer_chain.invoke({
-            "question": standalone_question,
-            "context": formatted_context
-        })
-    else:
-        # 5b. Agentic "Relevance Guardrail" Check
-        is_relevant = relevance_router_chain.invoke({"question": standalone_question})
-        if "no" in is_relevant.lower():
-            return "I am an assistant specialized in Anaplan and related topics. I cannot answer questions outside of this scope."
-        else:
-            # 5c. Perform Web Search
-            web_results = web_search_tool.invoke(standalone_question)
-            web_context = "\n\n".join(
-                [f"--- Web Source ---\nURL: {result['url']}\nContent: {result['content']}" for result in web_results])
-            combined_context = f"Internal Knowledge Base Context:\n{formatted_context}\n\nLive Web Search Context:\n{web_context}"
-            # 5d. Generate final answer with combined context
-            return answer_chain.invoke({
-                "question": standalone_question,
-                "context": combined_context
+    # Initialize key statuses in session state if they don't exist
+    if 'key_statuses' not in st.session_state:
+        st.session_state.key_statuses = {f"Key {i + 1}": "✅ Active" for i in range(len(api_keys))}
+    if 'key_index' not in st.session_state:
+        st.session_state.key_index = 0
+
+    # 2. Loop through the keys, attempting to get a response
+    start_index = st.session_state.key_index
+
+    for i in range(len(api_keys)):
+        current_index = (start_index + i) % len(api_keys)
+        key_name = f"Key {current_index + 1}"
+
+        if st.session_state.key_statuses.get(key_name) == "❌ Exhausted":
+            continue
+
+        try:
+            current_key = api_keys[current_index]
+            llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", google_api_key=current_key, temperature=0,
+                                         convert_system_message_to_human=True)
+
+            # --- The entire RAG and Agentic pipeline now runs inside this loop ---
+
+            # A. Create standalone question
+            contextualize_q_prompt = ChatPromptTemplate.from_messages([
+                ("system",
+                 '''You are an expert search query reformulator for Anaplan. Your task is to create a single, self-contained search query based on the conversation history and the user's follow-up question for document retrieval.
+                 Follow these rules:
+                 1.) If the follow-up question is a direct continuation or clarification of the conversation history, merge them to form a complete query that fully reflects the user's intent without adding unnecessary words.
+                 2.) If the follow-up question is about a new topic or unrelated to the previous conversation, IGNORE the history and create the query only from the new question.
+                 3.) If the conversation history is empty, create the query using only the follow-up question.
+                 4.) Do not add words that are not present or strongly implied in the conversation. Stick to keywords from the user's input.
+                 5.) Ensure the final query is brief, precise, and suitable for retrieving relevant documents. Avoid filler words, generic phrases, or assumptions.
+                 STRICTLY REMEMBER:  
+                 - Output ONLY the final search query—no explanations or extra text.  
+                 - Do NOT answer the question or elaborate; only generate the query for document retrieval.  
+                 - Do not invent or infer terms unless clearly implied by the conversation context.
+                 '''
+                 ),
+                MessagesPlaceholder("chat_history"),
+                ("human", "{input}"),
+            ])
+            standalone_question = (contextualize_q_prompt | llm | StrOutputParser()).invoke({
+                "chat_history": chat_history, "input": user_question
             })
 
+            # B. Retrieve and Re-rank
+            retriever = load_vector_store().as_retriever(search_kwargs={"k": 20})
+            reranker = load_reranker()
+            # st.write("standalone :",standalone_question)
+            retrieved_docs = retriever.invoke(standalone_question)
+            reranked_docs = rerank_docs({"question": standalone_question, "docs": retrieved_docs}, reranker)
+            formatted_context, links = format_docs(reranked_docs)
+            # st.write(links)
 
-# --- UI Rendering (UNCHANGED) ---
+            # C. Agentic Routing
+            gap_router_prompt = ChatPromptTemplate.from_template("""Based on the user's question, and the retrieved context, determine if the context is sufficient to provide a high-confidence answer. Respond with only 'Yes' or 'No'.
+            QUESTION: {question}
+            CONTEXT: {context}""")
+            gap_router_chain = gap_router_prompt | llm | StrOutputParser()
+            decision = gap_router_chain.invoke({"question": standalone_question, "context": formatted_context})
+
+            # D. Final Answer Generation
+            answer_prompt = ChatPromptTemplate.from_template("""
+            You are an expert Anaplan assistant.  
+            Use all the information provided in the context to create a comprehensive and accurate answer to the user's question.  
+            - Base your answer strictly on the provided context. Do not include information from outside the context.  
+            - Combine all relevant details from the context to ensure the answer is as complete and helpful as possible.  
+            - Present the answer as clear, concise, and professional bullet points.  
+            - If the context does not provide sufficient information to answer the question confidently, explicitly state that no specific answer is available and do not speculate or add outside knowledge.  
+            - After the answer, include a "Sources:" section listing all relevant source URLs mentioned in the context. If no sources are provided, write "Sources: None".  
+            CONTEXT:  
+            {context}  
+
+            QUESTION:  
+            {question}  
+
+            ANSWER:
+
+            """)
+            answer_chain = answer_prompt | llm | StrOutputParser()
+
+            if "yes" in decision.lower():
+                response = answer_chain.invoke({"question": standalone_question, "context": formatted_context})
+            else:
+                relevance_router_prompt = ChatPromptTemplate.from_template("""
+                You are a topic classifier. Your task is to determine if the user's question is related to Anaplan, business planning, finance, supply chain, or data modeling topics. 
+                Even if it is little realted with anaplan try responding with 'Yes'
+                Respond with only 'Yes' or 'No'.
+                QUESTION: {question}
+                """)
+                relevance_router_chain = relevance_router_prompt | llm | StrOutputParser()
+                is_relevant = relevance_router_chain.invoke({"question": standalone_question})
+
+                if "no" in is_relevant.lower():
+                    response = "I am an assistant specialized in Anaplan and related topics. I cannot answer questions outside of this scope."
+                else:
+                    web_search_tool = load_search_tool()
+                    web_results = web_search_tool.invoke(standalone_question)
+                    web_context = "\n\n".join(
+                        [f"--- Web Source ---\nURL: {result['url']}\nContent: {result['content']}" for result in
+                         web_results if isinstance(result, dict)])
+                    combined_context = f"Internal Knowledge Base Context:\n{formatted_context}\n\nLive Web Search Context:\n{web_context}"
+                    response = answer_chain.invoke({"question": standalone_question, "context": combined_context})
+
+            st.session_state.key_index = (current_index + 1) % len(api_keys)
+            return response
+
+        except Exception as e:
+            st.toast(f"Current API Key is exhausted. Trying the next available key...", icon="🔑")
+            # st.warning(f"Current API Key is exhausted. Trying the next available key...", icon="🔑")
+            st.session_state.key_statuses[key_name] = "❌ Exhausted"
+            continue
+
+        # except Exception as e:
+        #     return f"An unexpected error occurred with {key_name}: {e}"
+
+    return "Error: All available API keys have reached their daily limit. Please try again tomorrow."
+
+
+# --- UI Rendering ---
 with st.sidebar:
-    st.title("Synapse AI")
+    st.title("🚀 Synapse AI")
     if st.button("Start New Chat", use_container_width=True):
         st.session_state.messages = []
+        st.session_state.key_index = 0
+        st.session_state.key_statuses = {}
         st.rerun()
-
     st.markdown("### Relevant Prompts")
     suggested_prompts = ["What is Selective Access?", "How do I use SUM Function?", "Tell me about ALM.",
                          "Best Practices for multi-select filter."]
@@ -286,21 +305,26 @@ with st.sidebar:
 
     for prompt_text in suggested_prompts:
         st.button(prompt_text, on_click=handle_sidebar_click, args=[prompt_text], use_container_width=True)
-
     st.info("For any grievances or feedback, please contact us at: synapse.ai.help@gmail.com")
+
+    st.markdown("---")
+    st.markdown("### API Key Status")
+    if 'key_statuses' in st.session_state and st.session_state.key_statuses:
+        for key, status in st.session_state.key_statuses.items():
+            st.markdown(f"- {key}: {status}")
+    else:
+        st.markdown("No keys loaded yet.")
 
 st.header("New Chat")
 
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hello! How can I help you with your Anaplan questions today?"}]
+    st.session_state.messages = [{"role": "assistant", "content": "Hello! How can I help you today?"}]
 
 
 def process_and_display(prompt):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
-
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             try:
@@ -326,7 +350,3 @@ if st.session_state.get("clicked_prompt"):
 
 if prompt := st.chat_input("Ask your question..."):
     process_and_display(prompt)
-
-
-
-
