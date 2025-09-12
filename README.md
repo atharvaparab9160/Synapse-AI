@@ -1,92 +1,129 @@
-# Synapse AI: A Community-Powered RAG Chatbot with Agentic Capabilities
+# Synapse AI - Anaplan Community Assistant
 
-Synapse AI is a full-stack, **Retrieval-Augmented Generation (RAG)** application designed to provide accurate, source-cited answers to user queries. It leverages a comprehensive knowledge base built by scraping thousands of real-world discussions from the Anaplan Community forums. This project demonstrates an end-to-end AI/ML workflow, from high-speed data collection and advanced retrieval strategies to a deployed, interactive web application with conversational memory.
+[//]: # ([]&#40;https://www.python.org/downloads/&#41;  )
 
-[//]: # ([Live Demo]&#40;<!--- <<< 👈 PASTE YOUR LIVE STREAMLIT URL HERE --->&#41;)
+[//]: # ([]&#40;https://www.langchain.com/&#41;  )
+
+[//]: # ([]&#40;https://streamlit.io/&#41;  )
+
+[//]: # ([]&#40;https://www.google.com/search?q=YOUR_STREAMLIT_APP_URL_HERE&#41;  )
+
+[//]: # ()
+[//]: # (**[▶️ View the Live Demo]&#40;https://www.google.com/search?q=YOUR_STREAMLIT_APP_URL_HERE&#41;**)
+
+Synapse AI is an advanced, agentic Retrieval-Augmented Generation (RAG) chatbot designed to be a subject-matter expert on the Anaplan platform. It leverages a comprehensive knowledge base built from over 14,000 real-world discussion threads from the Anaplan Community forum to provide accurate, context-aware, and source-cited answers to user questions.
 
 ---
 
-## Key Features
+## Key Features & Engineering Highlights
 
-- **High-Speed, Parallel Data Collection**  
-  Engineered a robust web scraper using Python and `concurrent.futures` to extract over 14,000 Q&A threads, increasing data collection efficiency by over 10x compared to sequential methods.
+This project goes beyond a simple RAG implementation by incorporating a full engineering lifecycle, from data acquisition to a deployed, resilient application.
 
-- **Advanced RAG with Re-ranking**  
-  Implements a two-stage retrieval process. After a fast initial search in a ChromaDB vector store, a sentence-transformers Cross-Encoder re-ranks the results for maximum contextual relevance, significantly improving answer quality.
+- **High-Speed, Parallelized Data Pipeline**  
+  Engineered a robust web scraper using Python's `concurrent.futures` to process thousands of forum pages in parallel. This **increased data collection efficiency by over 10x** compared to sequential methods, reducing a multi-hour task to under an hour.
 
-- **Agentic Web Search & Guardrails**  
-  The bot identifies "knowledge gaps" in its internal database. It uses an LLM-powered guardrail to check if the user's query is on-topic. If needed, it performs a live web search via the Tavily API for up-to-date information.
+- **Resilient Scraping**  
+  The scraper is fault-tolerant, with a built-in **retry mechanism and exponential backoff** to handle temporary server errors (`503` errors), ensuring a near-100% success rate on large-scale data collection.
+
+- **Advanced RAG Pipeline**  
+  Uses a sophisticated **"Retrieve & Re-rank"** strategy. After an initial vector search, a `CrossEncoder` model re-ranks the results for the highest contextual relevance, significantly improving the quality of the information sent to the LLM.
 
 - **Conversational Memory**  
-  Maintains full chat history, allowing users to ask natural, context-aware follow-up questions.
+  The agent can handle natural, multi-turn conversations. It uses a **history-aware retriever** to intelligently reformulate follow-up questions into standalone queries, ensuring accurate retrieval without "prompt pollution."
 
-- **Professional UI & Deployment**  
-  Polished, responsive user interface built with Streamlit, deployed on Streamlit Community Cloud, and connected to a hosted ChromaDB Cloud database for instant startup times.
+- **Agentic Workflow & Guardrails**  
+  - **Knowledge Gap Detector:** Self-critiques internal search results. If insufficient, it performs a **live web search** using the Tavily API.  
+  - **Topic Guardrail:** Ensures the bot remains focused on its expertise, politely refusing to answer off-topic questions.
+
+- **Resilient API Key Management**  
+  Implemented a **"Use-Until-Exhausted" (Failover)** system to manage a pool of API keys. Automatically retries with backup keys if one is rate-limited.
+
+- **Decoupled & Deployed Architecture**  
+  The Streamlit app connects to a **hosted ChromaDB Cloud** vector store, decoupling the UI from data for **instant startup times** and a seamless user experience.
+
+---
+
+## Architecture Overview
+
+The project is broken down into three main phases:
+
+### 1. Phase 1: Data Pipeline (Scraping)
+
+- `Anaplan Forums` → `Parallelized Scraper (Python)` → `Structured JSON Files`  
+- Multi-threaded Python script scrapes specified tags, handling errors and saving structured Q&A data.
+
+### 2. Phase 2: Knowledge Base Creation (Vectorization)
+
+- `JSON Files` → `Document Chunker & Embedder (Python)` → `ChromaDB Cloud`  
+- Processes raw data, splits long documents into smaller chunks, generates embeddings using `BAAI/bge-small-en-v1.5`, and uploads to ChromaDB.
+
+### 3. Phase 3: RAG Application (UI & Logic)
+
+- `User` → `Streamlit UI` → `LangChain Agent` → `Gemini LLM` → `Streamlit UI`  
+- The Streamlit app captures user input, reformulates queries, retrieves & re-ranks context, and generates a sourced answer via Gemini 2.5 Flash-Lite.
 
 ---
 
 ## Tech Stack
 
-- **Languages & Frameworks:** Python, LangChain, Streamlit, FastAPI  
-- **AI & ML:** Hugging Face Transformers (`sentence-transformers`), Google Gemini 1.5 Flash, Tavily Search API  
-- **Vector Database:** ChromaDB Cloud  
-- **Data Handling:** BeautifulSoup, Requests, JSON, `concurrent.futures`  
-- **Deployment & Tools:** Git, GitHub, Streamlit Community Cloud, Docker  
+- **Backend & Orchestration:** Python, LangChain  
+- **AI & ML:** Google Gemini, Hugging Face Transformers (Sentence Transformers, Cross-Encoders)  
+- **Database:** ChromaDB Cloud (Vector Store)  
+- **Data Collection:** BeautifulSoup, Requests, Concurrent Futures  
+- **Frontend & Deployment:** Streamlit, Streamlit Community Cloud  
 
 ---
 
-## Project Architecture
+## Local Setup & Installation
 
-The system is decoupled into three main components:
+To run this project locally:
 
-1. **Data Pipeline**  
-   - `scrap_with_all_comments.py`: Parallelized Python script that extracts and structures thousands of Q&A threads into JSON files.  
-   - Includes retry mechanisms for handling large-scale scraping errors.
-
-2. **Knowledge Base Creation**  
-   - `create_vector_db_with_chunking.py`: Processes raw JSON, splits long documents into chunks, converts them into embeddings, and uploads to ChromaDB Cloud.
-
-3. **RAG Application**  
-   - `app.py`: Streamlit application that provides the UI and orchestrates the agentic workflow.  
-   - Retrieves and re-ranks context, decides on live web search, and generates sourced answers via Gemini LLM.
-
----
-
-## How to Run Locally
-
-### 1. Clone the repository:
+### 1. Clone the Repository
 ```bash
-git clone https://github.com/atharvaparab9160/Synapse-AI.git
+git clone https://github.com/your-username/Synapse-AI.git
 cd Synapse-AI
-## Setup & Run Instructions
 ```
-Follow these steps to set up and run Synapse AI locally:
 
-### 2. Install Dependencies
+### 2. Create a Virtual Environment
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
 
+### 3. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Set Up Your Credentials
-
-Create a `.env` file in the root directory of the project and add your API keys:
+### 4. Set Up Environment Variables
+Create a `.env` file in the root directory and add your keys:
 
 ```env
-GOOGLE_API_KEY="YOUR_GEMINI_API_KEY"
-CHROMA_API_KEY="YOUR_CHROMA_API_KEY"
-CHROMA_TENANT="YOUR_CHROMA_TENANT_ID"
-CHROMA_DATABASE="YOUR_CHROMA_DATABASE_NAME"
-TAVILY_API_KEY="YOUR_TAVILY_API_KEY"
+# For the LLM
+GOOGLE_API_KEYS="your_gemini_key_2,your_gemini_key_1,your_gemini_key_3..."
+
+# For the hosted Vector DB
+CHROMA_API_KEY="your_chroma_api_key"
+CHROMA_TENANT="your_chroma_tenant_id"
+CHROMA_DATABASE="your_chroma_database_name"
+
+# For the Agentic Web Search
+TAVILY_API_KEY="your_tavily_api_key"
 ```
 
-> **Note:** Replace the placeholders with your actual API keys.
-
-### 4. Run the Streamlit Application
-
+### 5. Run the Application
 ```bash
 streamlit run app.py
 ```
 
-Open the URL displayed in the terminal (usually `http://localhost:8501`) in your browser to access Synapse AI.
+> The deployed version connects to a pre-built ChromaDB Cloud database. To build your own database locally, first run the scraping and vectorization scripts.
 
+---
+
+## Future Enhancements
+
+- **Quantitative Evaluation Framework**  
+  Add evaluation with `RAGAs` and a curated "golden dataset" to benchmark with metrics like faithfulness and relevancy.  
+
+- **Automated Data Refresh**  
+  Set up CI/CD with GitHub Actions to periodically scrape and update the knowledge base.  
