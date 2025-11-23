@@ -4,14 +4,14 @@ import chromadb
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.vectorstores import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
-from langchain.schema.output_parser import StrOutputParser
+from langchain_core.output_parsers import StrOutputParser
 from dotenv import load_dotenv
 import re
 from sentence_transformers.cross_encoder import CrossEncoder
 from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain.chains import create_history_aware_retriever
+# from langchain.chains import create_history_aware_retriever
 from langchain_core.prompts import MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
 # --- NEW IMPORT FOR THE SPECIFIC RATE LIMIT ERROR ---
@@ -215,7 +215,7 @@ def get_response(user_question: str, chat_history: list):
             # B. Retrieve and Re-rank
             retriever = load_vector_store().as_retriever(search_kwargs={"k": 20})
             reranker = load_reranker()
-            # st.write("standalone :",standalone_question)
+            st.write("standalone :",standalone_question)
             retrieved_docs = retriever.invoke(standalone_question)
             reranked_docs = rerank_docs({"question": standalone_question, "docs": retrieved_docs}, reranker)
             formatted_context, links = format_docs(reranked_docs)
